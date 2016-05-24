@@ -426,14 +426,14 @@ namespace GitCommands
 
         public bool HasSubmodules()
         {
-            return GetSubmodulesLocalPathes(recursive: false).Any();
+            return GetSubmodulesLocalPaths(recursive: false).Any();
         }
 
         /// <summary>
         /// This is a faster function to get the names of all submodules then the
         /// GetSubmodules() function. The command @git submodule is very slow.
         /// </summary>
-        public IList<string> GetSubmodulesLocalPathes(bool recursive = true)
+        public IList<string> GetSubmodulesLocalPaths(bool recursive = true)
         {
             var configFile = GetSubmoduleConfigFile();
             var submodules = configFile.ConfigSections.Select(configSection => configSection.GetPathValue("path").Trim()).ToList();
@@ -1469,7 +1469,7 @@ namespace GitCommands
             return path.Contains(Path.DirectorySeparatorChar) || path.Contains(AppSettings.PosixPathSeparator.ToString());
         }
 
-        public string FetchCmd(string remote, string remoteBranch, string localBranch, bool? fetchTags = false)
+        public string FetchCmd(string remote, string remoteBranch, string localBranch, bool? fetchTags = false, bool isUnshallow = false)
         {
             var progressOption = "";
             if (GitCommandHelpers.VersionInUse.FetchCanAskForProgress)
@@ -1478,10 +1478,10 @@ namespace GitCommands
             if (string.IsNullOrEmpty(remote) && string.IsNullOrEmpty(remoteBranch) && string.IsNullOrEmpty(localBranch))
                 return "fetch " + progressOption;
 
-            return "fetch " + progressOption + GetFetchArgs(remote, remoteBranch, localBranch, fetchTags);
+            return "fetch " + progressOption + GetFetchArgs(remote, remoteBranch, localBranch, fetchTags, isUnshallow);
         }
 
-        public string PullCmd(string remote, string remoteBranch, string localBranch, bool rebase, bool? fetchTags = false)
+        public string PullCmd(string remote, string remoteBranch, string localBranch, bool rebase, bool? fetchTags = false, bool isUnshallow = false)
         {
             var pullArgs = "";
             if (GitCommandHelpers.VersionInUse.FetchCanAskForProgress)
@@ -1490,10 +1490,10 @@ namespace GitCommands
             if (rebase)
                 pullArgs = "--rebase".Combine(" ", pullArgs);
 
-            return "pull " + pullArgs + GetFetchArgs(remote, remoteBranch, localBranch, fetchTags);
+            return "pull " + pullArgs + GetFetchArgs(remote, remoteBranch, localBranch, fetchTags, isUnshallow);
         }
 
-        private string GetFetchArgs(string remote, string remoteBranch, string localBranch, bool? fetchTags)
+        private string GetFetchArgs(string remote, string remoteBranch, string localBranch, bool? fetchTags, bool isUnshallow)
         {
             remote = remote.ToPosixPath();
 
@@ -1525,6 +1525,9 @@ namespace GitCommands
                 localBranchArguments = ":" + "refs/remotes/" + remote.Trim() + "/" + localBranch;
 
             string arguments = fetchTags == true ? " --tags" : fetchTags == false ? " --no-tags" : "";
+
+            if(isUnshallow)
+                arguments += " --unshallow";
 
             return "\"" + remote.Trim() + "\" " + remoteBranchArguments + localBranchArguments + arguments;
         }
@@ -2041,7 +2044,7 @@ namespace GitCommands
             for (int i = 0; i < list.Length; i++)
             {
                 string stashString = list[i];
-                if (stashString.IndexOf(':') > 0 && ! stashString.StartsWith("fatal: "))
+                if (stashString.IndexOf(':') > 0 && !stashString.StartsWith("fatal: "))
                 {
                     stashes.Add(new GitStash(stashString, i));
                 }
@@ -2160,7 +2163,7 @@ namespace GitCommands
                 }).ToList();
 
             // Doesn't work with removed submodules
-            var submodulesList = GetSubmodulesLocalPathes();
+            var submodulesList = GetSubmodulesLocalPaths();
             foreach (var item in list)
             {
                 if (submodulesList.Contains(item.Name))
@@ -2631,6 +2634,32 @@ namespace GitCommands
             if (info.Trim().StartsWith("fatal") || info.Trim().StartsWith("error:"))
                 return new List<string>();
             return info.Split(new[] { '\r', '\n', '*', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        /// <summary>
+        /// Returns tag's message. If the lightweight tag is passed, corresponding commit message
+        /// is returned.
+        /// </summary>
+        public string GetTagMessage(string tag)
+        {
+            if( string.IsNullOrWhiteSpace(tag))
+                return null;
+
+            tag = tag.Trim();
+
+            string info = RunGitCmd("tag -l -n10 " + tag, SystemEncoding);
+
+            if (info.Trim().StartsWith("fatal") || info.Trim().StartsWith("error:"))
+                return null;
+
+            if (!info.StartsWith(tag))
+                return null;
+
+            info = info.Substring(tag.Length).Trim();
+            if (info.Length == 0)
+                return null;
+
+            return info;
         }
 
         /// <summary>
@@ -3198,6 +3227,57 @@ namespace GitCommands
                 }
             }
             return branchName;
+        }
+
+        public IList<GitItemStatus> GetCombinedDiffFileList(string shaOfMergeCommit)
+        {
+            var fileList = RunGitCmd("diff-tree --name-only -z --cc --no-commit-id " + shaOfMergeCommit);
+
+            var ret = new List<GitItemStatus>();
+            if (string.IsNullOrWhiteSpace(fileList))
+            {
+                return ret;
+            }
+
+            var files = fileList.Split(new []{'\0'}, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var file in files)
+            {
+                var item = new GitItemStatus
+                {
+                    IsChanged = true,
+                    IsConflict = true,
+                    IsTracked = true,
+                    IsDeleted = false,
+                    IsStaged = false,
+                    IsNew = false,
+                    Name = file,
+                };
+                ret.Add(item);
+            }
+
+            return ret;
+        }
+
+        public string GetCombinedDiffContent(GitRevision revisionOfMergeCommit, string filePath,
+            string extraArgs, Encoding encoding)
+        {
+            var cmd = string.Format("diff-tree {4} --no-commit-id {0} {1} {2} -- {3}",
+                extraArgs,
+                revisionOfMergeCommit.Guid,
+                AppSettings.UsePatienceDiffAlgorithm ? "--patience" : "",
+                filePath,
+                AppSettings.OmitUninterestingDiff? "--cc" : "-c -p");
+
+            var patchManager = new PatchManager();
+            var patch = RunCacheableCmd(AppSettings.GitCommand, cmd, LosslessEncoding);
+
+            if (string.IsNullOrWhiteSpace(patch))
+            {
+                return "";
+            }
+
+            patchManager.LoadPatch(patch, false, encoding);
+            return GetPatch(patchManager, filePath, filePath).Text;
         }
     }
 }
