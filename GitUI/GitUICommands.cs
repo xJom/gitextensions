@@ -428,7 +428,7 @@ namespace GitUI
         /// </summary>
         /// <param name="requiresValidWorkingDir">If action requires valid working directory</param>
         /// <param name="owner">Owner window</param>
-        /// <param name="changesRepo">if successfuly done action changes repo state</param>
+        /// <param name="changesRepo">if successfully done action changes repo state</param>
         /// <param name="preEvent">Event invoked before performing action</param>
         /// <param name="postEvent">Event invoked after performing action</param>
         /// <param name="action">Action to do. Return true to indicate that the action was successfully done.</param>
@@ -1210,11 +1210,11 @@ namespace GitUI
             return StartDeleteTagDialog(null, "");
         }
 
-        public bool StartEditGitIgnoreDialog(IWin32Window owner)
+        public bool StartEditGitIgnoreDialog(IWin32Window owner, bool localExcludes)
         {
             Func<bool> action = () =>
             {
-                using (var form = new FormGitIgnore(this))
+                using (var form = new FormGitIgnore(this, localExcludes))
                     form.ShowDialog(owner);
 
                 return true;
@@ -1223,17 +1223,16 @@ namespace GitUI
             return DoActionOnRepo(owner, true, false, PreEditGitIgnore, PostEditGitIgnore, action);
         }
 
-        public bool StartEditGitIgnoreDialog()
+        public bool StartEditGitIgnoreDialog(bool localExcludes)
         {
-            return StartEditGitIgnoreDialog(null);
+            return StartEditGitIgnoreDialog(null, localExcludes);
         }
 
-        public bool StartAddToGitIgnoreDialog(IWin32Window owner, params string[] filePattern)
+        public bool StartAddToGitIgnoreDialog(IWin32Window owner, bool localExclude, params string[] filePattern)
         {
-
             Func<bool> action = () =>
             {
-                using (var frm = new FormAddToGitIgnore(this, filePattern))
+                using (var frm = new FormAddToGitIgnore(this, localExclude, filePattern))
                     frm.ShowDialog(owner);
 
                 return true;
@@ -1482,11 +1481,11 @@ namespace GitUI
             return StartSettingsDialog(owner, GitUI.CommandsDialogs.SettingsDialog.Pages.GitConfigSettingsPage.GetPageReference());
         }
 
-        public bool StartBrowseDialog(IWin32Window owner, string filter)
+        public bool StartBrowseDialog(IWin32Window owner, string filter, string selectedCommit)
         {
             if (!InvokeEvent(owner, PreBrowse))
                 return false;
-            var form = new FormBrowse(this, filter);
+            var form = new FormBrowse(this, filter, selectedCommit);
 
             if (Application.MessageLoop)
             {
@@ -1503,7 +1502,12 @@ namespace GitUI
 
         public bool StartBrowseDialog(string filter)
         {
-            return StartBrowseDialog(null, filter);
+            return StartBrowseDialog(null, filter, null);
+        }
+
+        public bool StartBrowseDialog(string filter, string selectedCommit)
+        {
+            return StartBrowseDialog(null, filter, selectedCommit);
         }
 
         public void StartFileHistoryDialog(IWin32Window owner, string fileName, GitRevision revision, bool filterByRevision, bool showBlame)
@@ -1690,11 +1694,11 @@ namespace GitUI
             return StartBlameDialog(owner, fileName, null);
         }
 
-        private bool StartBlameDialog(IWin32Window owner, string fileName, GitRevision revision)
+        private bool StartBlameDialog(IWin32Window owner, string fileName, GitRevision revision, int? initialLine = null)
         {
             return DoActionOnRepo(owner, true, false, PreBlame, PostBlame, () =>
                 {
-                    using (var frm = new FormBlame(this, fileName, revision))
+                    using (var frm = new FormBlame(this, fileName, revision, initialLine))
                         frm.ShowDialog(owner);
 
                     return true;
@@ -1702,9 +1706,9 @@ namespace GitUI
             );
         }
 
-        public bool StartBlameDialog(string fileName)
+        public bool StartBlameDialog(string fileName, int? initialLine = null)
         {
-            return StartBlameDialog(null, fileName, null);
+            return StartBlameDialog(null, fileName, null, initialLine);
         }
 
         private bool StartBlameDialog(string fileName, GitRevision revision)
@@ -1905,7 +1909,7 @@ namespace GitUI
                     Module.RunBash();
                     return;
                 case "gitignore":
-                    StartEditGitIgnoreDialog();
+                    StartEditGitIgnoreDialog(false);
                     return;
                 case "init":        // [path]
                     RunInitCommand(args);
@@ -2011,7 +2015,7 @@ namespace GitUI
 
         private void RunBrowseCommand(string[] args)
         {
-            StartBrowseDialog(GetParameterOrEmptyStringAsDefault(args, "-filter"));
+            StartBrowseDialog(GetParameterOrEmptyStringAsDefault(args, "-filter"), GetParameterOrEmptyStringAsDefault(args, "-commit"));
         }
 
         private static string GetParameterOrEmptyStringAsDefault(string[] args, string paramName)
@@ -2072,7 +2076,7 @@ namespace GitUI
             //Remove working directory from filename. This is to prevent filenames that are too
             //long while there is room left when the workingdir was not in the path.
             string fileHistoryFileName = String.IsNullOrEmpty(Module.WorkingDir) ? args[2] :
-                args[2].Replace(Module.WorkingDir, "").Replace('\\', '/');
+                args[2].Replace(Module.WorkingDir, "").ToPosixPath();
 
             StartFileHistoryDialog(fileHistoryFileName);
         }
@@ -2097,8 +2101,19 @@ namespace GitUI
         {
             // Remove working directory from filename. This is to prevent filenames that are too
             // long while there is room left when the workingdir was not in the path.
-            string filenameFromBlame = args[2].Replace(Module.WorkingDir, "").Replace('\\', '/');
-            StartBlameDialog(filenameFromBlame);
+            string filenameFromBlame = args[2].Replace(Module.WorkingDir, "").ToPosixPath();
+
+            int? initialLine = null;
+            if( args.Length >= 4 )
+            {
+                int temp;
+                if( int.TryParse( args[3], out temp ) )
+                {
+                    initialLine = temp;
+                }
+            }
+
+            StartBlameDialog(filenameFromBlame, initialLine);
         }
 
         private void RunMergeToolOrConflictCommand(Dictionary<string, string> arguments)

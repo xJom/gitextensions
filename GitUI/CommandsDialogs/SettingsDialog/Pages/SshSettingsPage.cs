@@ -4,6 +4,7 @@ using System.IO;
 using GitCommands;
 using GitCommands.Utils;
 using Microsoft.Win32;
+using GitUI.Editor;
 
 namespace GitUI.CommandsDialogs.SettingsDialog.Pages
 {
@@ -15,6 +16,8 @@ namespace GitUI.CommandsDialogs.SettingsDialog.Pages
             InitializeComponent();
             Text = "SSH";
             Translate();
+
+            label18.ForeColor = ColorHelper.GetForeColorForBackColor(label18.BackColor);
         }
 
         protected override string GetCommaSeparatedKeywordList()
@@ -71,6 +74,7 @@ namespace GitUI.CommandsDialogs.SettingsDialog.Pages
 
         private void Putty_CheckedChanged(object sender, EventArgs e)
         {
+            groupBox2.Visible = Putty.Checked;
             if (Putty.Checked)
             {
                 AutoFindPuttyPaths();

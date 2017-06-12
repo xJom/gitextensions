@@ -624,15 +624,14 @@ namespace GitCommands
             }.ToString();
         }
 
-        public static string PushTagCmd(string path, string tag, bool all, bool force = false)
+        public static string PushTagCmd(string path, string tag, bool all,
+            ForcePushOptions force = ForcePushOptions.DoNotForce)
         {
             path = path.ToPosixPath();
 
             tag = tag.Replace(" ", "");
 
-            var sforce = "";
-            if (force)
-                sforce = "-f ";
+            var sforce = GetForcePushArgument(force);
 
             var sprogressOption = "";
             if (VersionInUse.PushCanAskForProgress)
@@ -646,6 +645,16 @@ namespace GitCommands
                 return "push " + options + "\"" + path.Trim() + "\" tag " + tag;
 
             return "";
+        }
+
+        public static string GetForcePushArgument(ForcePushOptions force)
+        {
+            var sforce = "";
+            if (force == ForcePushOptions.Force)
+                sforce = "-f ";
+            else if (force == ForcePushOptions.ForceWithLease)
+                sforce = "--force-with-lease ";
+            return sforce;
         }
 
         public static string StashSaveCmd(bool untracked, bool keepIndex, string message)
@@ -904,7 +913,7 @@ namespace GitCommands
 
                 if (line != null)
                 {
-                    var match = Regex.Match(line, @"diff --git a/(\S+) b/(\S+)");
+                    var match = Regex.Match(line, @"diff --git a/(.+)\sb/(.+)");
                     if (match.Groups.Count > 1)
                     {
                         status.Name = match.Groups[1].Value;
@@ -912,7 +921,7 @@ namespace GitCommands
                     }
                     else
                     {
-                        match = Regex.Match(line, @"diff --cc (\S+)");
+                        match = Regex.Match(line, @"diff --cc (.+)");
                         if (match.Groups.Count > 1)
                         {
                             status.Name = match.Groups[1].Value;
@@ -1129,7 +1138,7 @@ namespace GitCommands
             return string.Empty;
         }
 
-        public static string MergeBranchCmd(string branch, bool allowFastForward, bool squash, bool noCommit, string strategy)
+        public static string MergeBranchCmd(string branch, bool allowFastForward, bool squash, bool noCommit, string strategy, bool allowUnrelatedHistories, string message, int? log)
         {
             StringBuilder command = new StringBuilder("merge");
 
@@ -1144,6 +1153,14 @@ namespace GitCommands
                 command.Append(" --squash");
             if (noCommit)
                 command.Append(" --no-commit");
+            if (allowUnrelatedHistories)
+                command.Append(" --allow-unrelated-histories");
+
+            if (!string.IsNullOrEmpty(message))
+                command.AppendFormat(" -m {0}", message.Quote());
+
+            if (log.HasValue)
+                command.AppendFormat(" --log={0}", log.Value);
 
             command.Append(" ");
             command.Append(branch);
